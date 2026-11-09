@@ -9,3 +9,5 @@ backend/.env
 .DS_Store
 **/.kotlin/
 backend/media/
+
+.fraty-token
