@@ -1,10 +1,12 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val fratyLocalProperties = java.util.Properties().apply {
+val fratyLocalProperties = Properties().apply {
     val secretsFile = rootProject.file("fraty.local.properties")
     if (secretsFile.isFile) secretsFile.inputStream().use { load(it) }
 }
