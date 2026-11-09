@@ -3,7 +3,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="FRATY AI 1.01"
+        android:label="FRATY AI 1.02"
         android:icon="@drawable/ic_launcher"
         android:roundIcon="@drawable/ic_launcher"
         android:theme="@style/Theme.FrATY"
