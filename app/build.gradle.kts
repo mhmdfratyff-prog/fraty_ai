@@ -20,8 +20,8 @@ android {
         applicationId = "com.fraty.ai"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.02"
+        versionCode = 4
+        versionName = "1.03"
         buildConfigField("String", "FRATY_BACKEND_URL", buildConfigString(fratyLocalProperties.getProperty("FRATY_BACKEND_URL", "")))
         buildConfigField("String", "FRATY_APP_TOKEN", buildConfigString(fratyLocalProperties.getProperty("FRATY_APP_TOKEN", "")))
     }

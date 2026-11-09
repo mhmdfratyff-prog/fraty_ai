@@ -75,7 +75,7 @@ private fun inferTaskMode(prompt: String): TaskMode {
     return when {
         listOf("فيديو", "مقطع", "video", "animate").any(text::contains) -> TaskMode.VIDEO
         listOf("صورة", "ارسم", "أنشئ صورة", "image", "thumbnail", "logo").any(text::contains) -> TaskMode.IMAGE
-        listOf("تطبيق", "apk", "android app", "build an app").any(text::contains) -> TaskMode.APP
+        listOf("تطبيق", "apk", "android app", "build an app", "build apk", "ابني التطبيق", "أنشئ تطبيق", "حوّل هذا الكود لتطبيق", "حول الكود لتطبيق").any(text::contains) -> TaskMode.APP
         listOf("كود", "برمج", "خطأ kotlin", "code", "debug", "function", "script").any(text::contains) -> TaskMode.CODE
         else -> TaskMode.CHAT
     }
@@ -132,12 +132,12 @@ private fun FratyApp(store: LocalStore) {
         try {
             val api = FratyApi(backendUrl, appToken)
             val response = when (taskMode) {
+                TaskMode.APP -> api.generateMedia("projects", content)
                 TaskMode.IMAGE -> api.generateMedia("images", content)
                 TaskMode.VIDEO -> api.generateMedia("videos", content)
                 else -> {
                     val instruction = when (taskMode) {
                         TaskMode.CODE -> "أجب كمهندس برمجيات. اشرح الحل واذكر الملفات والتعليمات اللازمة."
-                        TaskMode.APP -> "تعامل مع الطلب كمهمة إنشاء تطبيق. اقترح البنية والملفات والكود وخطوات البناء، ولا تدّعِ بناء APK إذا لم تتوفر خدمة بناء."
                         else -> ""
                     }
                     val payload = messages.toList().mapIndexed { index, message ->
@@ -185,7 +185,7 @@ private fun FratyApp(store: LocalStore) {
                     containerColor = Ink,
                     topBar = {
                         TopAppBar(
-                            title = { Column { Text("FRATY AI 1.02", fontWeight = FontWeight.Bold, fontSize = 17.sp); Text(destination.title, color = Muted, fontSize = 11.sp) } },
+                            title = { Column { Text("FRATY AI 1.03", fontWeight = FontWeight.Bold, fontSize = 17.sp); Text(destination.title, color = Muted, fontSize = 11.sp) } },
                             navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "القائمة", tint = White) } },
                             actions = { Box(Modifier.padding(end = 14.dp).size(9.dp).clip(CircleShape).background(if (backendUrl.isBlank()) Muted else Cyan)) },
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = Ink)
@@ -313,7 +313,7 @@ private fun MessageBubble(message: ChatMessage) {
             Spacer(Modifier.height(5.dp))
             Text(message.content, color = White, fontSize = 14.sp, lineHeight = 21.sp)
             if (!mediaUrl.isNullOrBlank()) {
-                Text("فتح الصورة أو الملف الناتج", color = Cyan, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp).clickable { uriHandler.openUri(mediaUrl) })
+            Text("تنزيل الملف الناتج", color = Cyan, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp).clickable { uriHandler.openUri(mediaUrl) })
             }
         }
     }
@@ -333,8 +333,8 @@ private fun SettingsPage(modifier: Modifier, url: String, token: String, onUrl: 
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("حالة التكامل", color = Cyan, fontWeight = FontWeight.Bold)
                 Text("المحادثة والبرمجة: POST /api/v1/chat (يتطلب مفتاح نموذج على الخادم).", color = Muted, fontSize = 12.sp)
-                Text("الصور: adapter حقيقي على POST /api/v1/images؛ يحتاج IMAGE_API_KEY وIMAGE_MODEL وPUBLIC_BASE_URL على الخادم.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
-                Text("الفيديو: يحتاج تحديد مزوّد وخادم HTTPS؛ بقية الوظائف مثل Firebase والصوت الحي ومشاركة الشاشة وبناء APK تحتاج إعدادها أيضًا.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("إنشاء التطبيقات: ينتج مشروع Android Studio مضغوطًا ZIP من وصفك أو كودك؛ بناء APK تلقائيًا غير متاح في الخطة المجانية الحالية.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("الصور والفيديو: غير مفعّلين على الخطة المجانية الحالية؛ بناء APK تلقائي يحتاج عامل بناء وربط GitHub منفصلًا.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
                 Text("الرمز هنا ليس مفتاح نموذج. يوصى بخادم HTTPS مع مصادقة ومعدلات استخدام محدودة.", color = Muted, fontSize = 11.sp)
             }
         }

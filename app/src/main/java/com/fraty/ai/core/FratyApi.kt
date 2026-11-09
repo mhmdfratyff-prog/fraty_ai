@@ -42,7 +42,7 @@ class FratyApi(private val baseUrl: String, private val appToken: String) {
     }
 
     suspend fun generateMedia(kind: String, prompt: String): String = withContext(Dispatchers.IO) {
-        require(kind == "images" || kind == "videos") { "نوع الوسائط غير مدعوم." }
+        require(kind == "images" || kind == "videos" || kind == "projects") { "نوع الطلب غير مدعوم." }
         val root = baseUrl.trim().trimEnd('/')
         require(root.startsWith("https://")) { "أدخل عنوان خادم HTTPS صالحًا من الإعدادات أولًا." }
         val connection = (URL("$root/api/v1/$kind").openConnection() as HttpURLConnection).apply {
@@ -69,7 +69,7 @@ class FratyApi(private val baseUrl: String, private val appToken: String) {
                 message != null && mediaUrl != null -> "$message\n$mediaUrl"
                 message != null -> message
                 mediaUrl != null -> mediaUrl
-                parsed.optString("jobId").isNotBlank() -> "تم بدء المهمة. رقمها: ${parsed.optString("jobId")}"
+                parsed.optString("jobId").isNotBlank() -> "تم بدء المهمة. رقمها: ${parsed.optString("jobId") }"
                 else -> throw IllegalStateException("استجابة الخادم لا تحتوي على نتيجة أو رابط تنزيل.")
             }
         } finally {

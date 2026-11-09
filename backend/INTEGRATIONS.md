@@ -1,6 +1,6 @@
 # FRATY AI integration points
 
-The backend implements OpenAI-compatible chat and an OpenAI Images-compatible generation adapter when configured. Video, realtime voice, Google sign-in, screen sharing, and isolated project builds still need provider/service setup. All provider secrets belong on the backend, never in the APK.
+The backend implements OpenAI-compatible chat, AI-generated Android source ZIPs, and an OpenAI Images-compatible generation adapter when configured. Video, realtime voice, Google sign-in, screen sharing, and automatic APK builds still need provider/service setup. All provider secrets belong on the backend, never in the APK.
 
 ## Implemented: OpenAI-compatible chat
 
@@ -8,11 +8,15 @@ Set these variables in the server environment (do not commit secret values):
 
 - `APP_ACCESS_TOKEN`: long random application access token. The server rejects requests if it is absent.
 - `GEMINI_API_KEY` or `OPENAI_API_KEY`: provider key, server-only.
-- `OPENAI_MODEL`: a model available to the selected provider. The free-tier example uses `gemini-2.5-flash`.
+- `OPENAI_MODEL`: a model available to the selected provider. The free-tier example uses `gemini-3.5-flash-lite`.
 - Optional `OPENAI_BASE_URL`: defaults to `https://api.openai.com/v1`; Gemini OpenAI-compatible base URL is `https://generativelanguage.googleapis.com/v1beta/openai/`.
 - Optional `PORT` and `MAX_REQUESTS_PER_MINUTE`.
 
 The Android app calls `POST /api/v1/chat`, sends recent messages, and authenticates with `X-App-Token`. The server proxies to `/chat/completions`, enforces body/message limits, and returns only the assistant text. Confirm that the provider's current API supports the OpenAI-compatible Chat Completions shape before use.
+
+## Implemented: Android source project ZIP
+
+`POST /api/v1/projects` accepts `{ "prompt": "..." }`. The configured chat model converts a description or pasted code into a Kotlin/Jetpack Compose starter app, places the generated activity in a fixed Android Studio template, and returns a signed temporary ZIP URL. The endpoint does not execute generated code, run Gradle, or produce an APK. Generated files should be reviewed and built in Android Studio; the download link uses the same temporary media storage and expiry as images.
 
 ## Implemented: OpenAI Images-compatible adapter
 
@@ -27,9 +31,9 @@ Implement and test each adapter on the backend before enabling the corresponding
 - **Screen sharing:** implement Android `MediaProjection` consent flow, foreground service with persistent notification and stop action, frame rate/size controls, explicit user stop/pause, secure transport, and server-side vision session. Never capture in background without consent.
 - **Image generation:** the adapter above is implemented; configure it, test provider/model access, and add production-grade storage, per-user authorization, policy controls, and spend limits before launch.
 - **Video generation:** select a provider; define job creation/status/cancel endpoints, progress states, polling/webhooks, storage and expiration. The app must not present a video before a real job succeeds.
-- **File/project workspace:** accept uploads with size/type limits, malware scanning, isolated processing, storage access controls, archive path validation, and short-lived download links. Generated source must be validated in an isolated build worker before offering an APK/ZIP.
+- **File/project workspace:** the source-project ZIP endpoint is implemented. Uploads, malware scanning, isolated APK builds, artifact storage, and production-grade validation remain unimplemented; do not describe the source ZIP as a built APK.
 
-`/api/v1/images` now has a real configurable adapter and returns HTTP 503 with a configuration message until its key and model are set and a public HTTPS origin is available. `/api/v1/videos` still returns HTTP 503 until a specific provider is selected and implemented. `/api/v1/integrations` reports configured capabilities. Do not claim a capability is active solely because its code path exists; test the provider and deployment first.
+`/api/v1/projects` generates a source ZIP when chat is configured. `/api/v1/images` has a real configurable adapter but returns HTTP 503 until its key and model are set; `/api/v1/videos` still returns HTTP 503 until a provider is selected and implemented. `/api/v1/integrations` reports configured capabilities. Do not claim a capability is active solely because its code path exists; test the provider and deployment first.
 
 ## Deployment guidance
 

@@ -2,6 +2,7 @@ import http from 'node:http';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { generateAndroidProject } from './project-generator.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
 const MAX_BODY_BYTES = 1_000_000;
@@ -154,6 +155,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && url.pathname === '/api/v1/integrations') {
     return json(res, 200, {
       chat: Boolean(CHAT_API_KEY && process.env.OPENAI_MODEL),
+      projectSource: Boolean(CHAT_API_KEY && process.env.OPENAI_MODEL),
       image: Boolean((process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY) && (process.env.IMAGE_MODEL || process.env.OPENAI_IMAGE_MODEL) && (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL)?.startsWith('https://')),
       video: false,
       realtimeVoice: false,
@@ -162,7 +164,7 @@ const server = http.createServer(async (req, res) => {
       fileAnalysis: false
     });
   }
-  const mediaMatch = /^\/api\/v1\/media\/([a-f0-9-]{36})\.(jpg|png|webp)$/.exec(url.pathname);
+  const mediaMatch = /^\/api\/v1\/media\/([a-f0-9-]{36})\.(jpg|png|webp|zip)$/.exec(url.pathname);
   if (req.method === 'GET' && mediaMatch) {
     if (!rateLimit(req, res)) return;
     const expires = Number(url.searchParams.get('expires'));
@@ -173,8 +175,10 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const bytes = await readFile(path.join(MEDIA_DIR, `${mediaMatch[1]}.${mediaMatch[2]}`));
-      const contentType = mediaMatch[2] === 'png' ? 'image/png' : mediaMatch[2] === 'webp' ? 'image/webp' : 'image/jpeg';
-      res.writeHead(200, { 'content-type': contentType, 'cache-control': 'private, max-age=300', 'x-content-type-options': 'nosniff' });
+      const contentType = mediaMatch[2] === 'zip' ? 'application/zip' : mediaMatch[2] === 'png' ? 'image/png' : mediaMatch[2] === 'webp' ? 'image/webp' : 'image/jpeg';
+      const headers = { 'content-type': contentType, 'cache-control': 'private, max-age=300', 'x-content-type-options': 'nosniff' };
+      if (mediaMatch[2] === 'zip') headers['content-disposition'] = 'attachment; filename="fraty-android-project.zip"';
+      res.writeHead(200, headers);
       return res.end(bytes);
     } catch { return json(res, 404, { error: 'انتهت صلاحية الصورة أو لم تعد موجودة.' }); }
   }
@@ -193,6 +197,41 @@ const server = http.createServer(async (req, res) => {
       const status = error.status || (error.name === 'AbortError' ? 504 : 500);
       console.error('Image request failed:', error.message);
       return json(res, status, { error: status === 504 ? 'انتهت مهلة إنشاء الصورة.' : error.message || 'تعذر إنشاء الصورة.' });
+    }
+  }
+  if (url.pathname === '/api/v1/projects') {
+    try {
+      const body = await readJson(req);
+      if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 16_000) {
+        return json(res, 400, { error: 'اكتب وصف التطبيق أو ألصق كوده بحد أقصى 16,000 حرف.' });
+      }
+      if (!CHAT_API_KEY || !process.env.OPENAI_MODEL) {
+        return json(res, 503, { error: 'توليد مشاريع Android غير مضبوط على الخادم.' });
+      }
+      const publicBase = (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+      if (!publicBase.startsWith('https://')) {
+        return json(res, 503, { error: 'الخادم لا يملك عنوان HTTPS عامًا لحفظ المشروع مؤقتًا.' });
+      }
+      const generated = await generateAndroidProject({
+        prompt: body.prompt.trim(),
+        apiKey: CHAT_API_KEY,
+        baseUrl: process.env.OPENAI_BASE_URL,
+        model: process.env.OPENAI_MODEL
+      });
+      await cleanupExpiredMedia();
+      const id = randomUUID();
+      await writeFile(path.join(MEDIA_DIR, `${id}.zip`), generated.bytes, { mode: 0o600 });
+      const expires = Math.floor(Date.now() / 1000) + MEDIA_TTL_SECONDS;
+      const signature = mediaSignature(id, expires);
+      const projectUrl = `${publicBase}/api/v1/media/${id}.zip?expires=${expires}&signature=${signature}`;
+      return json(res, 200, {
+        message: `تم تجهيز مشروع «${generated.appName}» كملف ZIP. نزّله وافتحه في Android Studio؛ هذه ملفات مصدر وليست APK جاهزًا.`,
+        url: projectUrl
+      });
+    } catch (error) {
+      const status = error.status || (error.name === 'AbortError' ? 504 : 500);
+      console.error('Project request failed:', error.message);
+      return json(res, status, { error: error.message || 'تعذر إنشاء مشروع Android.' });
     }
   }
   if (url.pathname === '/api/v1/videos') {
