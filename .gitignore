@@ -1,0 +1,11 @@
+.gradle/
+**/build/
+local.properties
+fraty.local.properties
+.env
+backend/.env
+*.iml
+.idea/
+.DS_Store
+**/.kotlin/
+backend/media/
