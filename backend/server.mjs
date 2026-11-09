@@ -2,6 +2,7 @@ import http from 'node:http';
 import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { getAndroidBuildStatus, readBuildSource, saveBuildApk, startAndroidBuild, validBuildId } from './build-controller.mjs';
 import { generateAndroidProject } from './project-generator.mjs';
 
 const PORT = Number(process.env.PORT || 8080);
@@ -45,14 +46,32 @@ function readJson(req) {
   });
 }
 
-function rateLimit(req, res) {
-  const key = req.socket.remoteAddress || 'unknown';
+function readRaw(req, limit) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', chunk => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(Object.assign(new Error('ملف APK أكبر من الحد المسموح.'), { status: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function rateLimit(req, res, bucket = 'default', limit = MAX_REQUESTS_PER_WINDOW) {
+  const key = `${bucket}:${req.socket.remoteAddress || 'unknown'}`;
   const now = Date.now();
   const item = counters.get(key) || { start: now, count: 0 };
   if (now - item.start >= WINDOW_MS) { item.start = now; item.count = 0; }
   item.count += 1;
   counters.set(key, item);
-  if (item.count > MAX_REQUESTS_PER_WINDOW) {
+  if (item.count > limit) {
     json(res, 429, { error: 'Rate limit exceeded. Try again shortly.' });
     return false;
   }
@@ -70,6 +89,15 @@ function authorize(req, res) {
   }
   if (!constantTimeMatch(req.headers['x-app-token'], expected)) {
     json(res, 401, { error: 'Missing or invalid application access token.' });
+    return false;
+  }
+  return true;
+}
+
+function authorizeBuildWorker(req, res) {
+  const expected = process.env.BUILD_WORKER_SECRET;
+  if (!expected || !constantTimeMatch(req.headers['x-build-worker-token'], expected)) {
+    json(res, 401, { error: 'عامل البناء غير مخوّل.' });
     return false;
   }
   return true;
@@ -156,6 +184,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, {
       chat: Boolean(CHAT_API_KEY && process.env.OPENAI_MODEL),
       projectSource: Boolean(CHAT_API_KEY && process.env.OPENAI_MODEL),
+      apkBuild: Boolean(process.env.BUILD_GITHUB_TOKEN && process.env.BUILD_WORKER_SECRET),
       image: Boolean((process.env.IMAGE_API_KEY || process.env.OPENAI_API_KEY) && (process.env.IMAGE_MODEL || process.env.OPENAI_IMAGE_MODEL) && (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL)?.startsWith('https://')),
       video: false,
       realtimeVoice: false,
@@ -164,7 +193,7 @@ const server = http.createServer(async (req, res) => {
       fileAnalysis: false
     });
   }
-  const mediaMatch = /^\/api\/v1\/media\/([a-f0-9-]{36})\.(jpg|png|webp|zip)$/.exec(url.pathname);
+  const mediaMatch = /^\/api\/v1\/media\/([a-f0-9-]{36})\.(jpg|png|webp|zip|apk)$/.exec(url.pathname);
   if (req.method === 'GET' && mediaMatch) {
     if (!rateLimit(req, res)) return;
     const expires = Number(url.searchParams.get('expires'));
@@ -175,12 +204,41 @@ const server = http.createServer(async (req, res) => {
     }
     try {
       const bytes = await readFile(path.join(MEDIA_DIR, `${mediaMatch[1]}.${mediaMatch[2]}`));
-      const contentType = mediaMatch[2] === 'zip' ? 'application/zip' : mediaMatch[2] === 'png' ? 'image/png' : mediaMatch[2] === 'webp' ? 'image/webp' : 'image/jpeg';
+      const contentType = mediaMatch[2] === 'apk' ? 'application/vnd.android.package-archive' : mediaMatch[2] === 'zip' ? 'application/zip' : mediaMatch[2] === 'png' ? 'image/png' : mediaMatch[2] === 'webp' ? 'image/webp' : 'image/jpeg';
       const headers = { 'content-type': contentType, 'cache-control': 'private, max-age=300', 'x-content-type-options': 'nosniff' };
       if (mediaMatch[2] === 'zip') headers['content-disposition'] = 'attachment; filename="fraty-android-project.zip"';
+      if (mediaMatch[2] === 'apk') headers['content-disposition'] = 'attachment; filename="fraty-generated-app.apk"';
       res.writeHead(200, headers);
       return res.end(bytes);
     } catch { return json(res, 404, { error: 'انتهت صلاحية الصورة أو لم تعد موجودة.' }); }
+  }
+  const buildSourceMatch = /^\/api\/v1\/build-jobs\/([a-f0-9-]{36})\/source$/.exec(url.pathname);
+  if (req.method === 'GET' && buildSourceMatch) {
+    if (!rateLimit(req, res) || !authorizeBuildWorker(req, res)) return;
+    try {
+      const source = await readBuildSource(buildSourceMatch[1]);
+      res.writeHead(200, { 'content-type': 'application/zip', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+      return res.end(source);
+    } catch (error) { return json(res, error.status || 500, { error: error.message || 'تعذر جلب ملفات البناء.' }); }
+  }
+  const buildResultMatch = /^\/api\/v1\/build-jobs\/([a-f0-9-]{36})\/result$/.exec(url.pathname);
+  if (req.method === 'POST' && buildResultMatch) {
+    if (!rateLimit(req, res) || !authorizeBuildWorker(req, res)) return;
+    try {
+      const apk = await readRaw(req, 45_000_000);
+      return json(res, 200, await saveBuildApk(buildResultMatch[1], apk));
+    } catch (error) { return json(res, error.status || 500, { error: error.message || 'تعذر حفظ APK الناتج.' }); }
+  }
+  const buildStatusMatch = /^\/api\/v1\/builds\/([a-f0-9-]{36})$/.exec(url.pathname);
+  if (req.method === 'GET' && buildStatusMatch) {
+    if (!rateLimit(req, res, 'build-status', 60) || !authorize(req, res)) return;
+    try {
+      const publicBase = (process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+      if (!publicBase.startsWith('https://')) return json(res, 503, { error: 'الخادم لا يملك عنوان HTTPS عامًا صالحًا.' });
+      const expires = Math.floor(Date.now() / 1000) + MEDIA_TTL_SECONDS;
+      const status = await getAndroidBuildStatus(buildStatusMatch[1], { publicBase, expires, sign: mediaSignature });
+      return json(res, 200, status);
+    } catch (error) { return json(res, error.status || 500, { error: error.message || 'تعذر قراءة حالة البناء.' }); }
   }
   if (req.method !== 'POST') return json(res, 404, { error: 'Not found.' });
   if (!rateLimit(req, res)) return;
@@ -232,6 +290,33 @@ const server = http.createServer(async (req, res) => {
       const status = error.status || (error.name === 'AbortError' ? 504 : 500);
       console.error('Project request failed:', error.message);
       return json(res, status, { error: error.message || 'تعذر إنشاء مشروع Android.' });
+    }
+  }
+  if (url.pathname === '/api/v1/builds') {
+    try {
+      const body = await readJson(req);
+      if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 16_000) {
+        return json(res, 400, { error: 'اكتب وصف التطبيق أو ألصق كوده بحد أقصى 16,000 حرف.' });
+      }
+      if (!CHAT_API_KEY || !process.env.OPENAI_MODEL) {
+        return json(res, 503, { error: 'توليد التطبيق غير مضبوط على الخادم.' });
+      }
+      await cleanupExpiredMedia();
+      const job = await startAndroidBuild({
+        prompt: body.prompt.trim(),
+        apiKey: CHAT_API_KEY,
+        baseUrl: process.env.OPENAI_BASE_URL,
+        model: process.env.OPENAI_MODEL
+      });
+      return json(res, 200, {
+        state: 'queued',
+        jobId: job.jobId,
+        message: `تم إنشاء مشروع «${job.appName}» وبدأ بناء APK التجريبي. سأنتظر اكتمال البناء.`
+      });
+    } catch (error) {
+      const status = error.status || (error.name === 'AbortError' ? 504 : 500);
+      console.error('APK build dispatch failed:', error.message);
+      return json(res, status, { error: error.message || 'تعذر بدء بناء APK.' });
     }
   }
   if (url.pathname === '/api/v1/videos') {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { zipSync, strToU8 } from 'fflate';
 
@@ -30,14 +31,14 @@ function normalizeKotlin(source) {
   return code;
 }
 
-function projectFiles({ appName, summary, mainActivity, wrapperJar, wrapperProperties, gradlew, gradlewBat }) {
+function projectFiles({ appName, applicationId, summary, mainActivity, wrapperJar, wrapperProperties, gradlew, gradlewBat }) {
   const escapedName = xmlEscape(appName);
   const readme = `# ${appName}\n\n${summary}\n\n## بناء APK\n\n1. افتح هذا المجلد في Android Studio وانتظر اكتمال Gradle Sync.\n2. اختر **Build > Build APK(s)**، أو نفّذ \`bash gradlew assembleDebug\` من الطرفية.\n3. ستجد APK الاختبار في \`app/build/outputs/apk/debug/app-debug.apk\`.\n\nهذا أرشيف مصدر، وليس APK جاهزًا. راجع الكود الناتج قبل تثبيت التطبيق أو استخدامه. يتطلب البناء Android SDK 35 واتصالًا لتنزيل اعتماديات Gradle أول مرة.\n`;
   const files = {
     'settings.gradle.kts': `pluginManagement {\n    repositories { google(); mavenCentral(); gradlePluginPortal() }\n}\n\ndependencyResolutionManagement {\n    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)\n    repositories { google(); mavenCentral() }\n}\n\nrootProject.name = "FratyGeneratedApp"\ninclude(":app")\n`,
     'build.gradle.kts': `plugins {\n    id("com.android.application") version "8.7.3" apply false\n    id("org.jetbrains.kotlin.android") version "2.0.21" apply false\n    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false\n}\n`,
     'gradle.properties': `org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8\nandroid.useAndroidX=true\nkotlin.code.style=official\n`,
-    'app/build.gradle.kts': `plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n    id("org.jetbrains.kotlin.plugin.compose")\n}\n\nandroid {\n    namespace = "com.fraty.generatedapp"\n    compileSdk = 35\n    defaultConfig {\n        applicationId = "com.fraty.generatedapp"\n        minSdk = 26\n        targetSdk = 35\n        versionCode = 1\n        versionName = "1.0"\n    }\n    buildFeatures { compose = true }\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n    kotlinOptions { jvmTarget = "17" }\n}\n\ndependencies {\n    implementation(platform("androidx.compose:compose-bom:2024.12.01"))\n    implementation("androidx.activity:activity-compose:1.10.0")\n    implementation("androidx.compose.ui:ui")\n    implementation("androidx.compose.ui:ui-graphics")\n    implementation("androidx.compose.ui:ui-tooling-preview")\n    implementation("androidx.compose.material3:material3")\n    implementation("androidx.compose.material:material-icons-extended")\n    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")\n    debugImplementation("androidx.compose.ui:ui-tooling")\n}\n`,
+    'app/build.gradle.kts': `plugins {\n    id("com.android.application")\n    id("org.jetbrains.kotlin.android")\n    id("org.jetbrains.kotlin.plugin.compose")\n}\n\nandroid {\n    namespace = "com.fraty.generatedapp"\n    compileSdk = 35\n    defaultConfig {\n        applicationId = "${applicationId}"\n        minSdk = 26\n        targetSdk = 35\n        versionCode = 1\n        versionName = "1.0"\n    }\n    buildFeatures { compose = true }\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n    kotlinOptions { jvmTarget = "17" }\n}\n\ndependencies {\n    implementation(platform("androidx.compose:compose-bom:2024.12.01"))\n    implementation("androidx.activity:activity-compose:1.10.0")\n    implementation("androidx.compose.ui:ui")\n    implementation("androidx.compose.ui:ui-graphics")\n    implementation("androidx.compose.ui:ui-tooling-preview")\n    implementation("androidx.compose.material3:material3")\n    implementation("androidx.compose.material:material-icons-extended")\n    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")\n    debugImplementation("androidx.compose.ui:ui-tooling")\n}\n`,
     'app/src/main/AndroidManifest.xml': `<?xml version="1.0" encoding="utf-8"?>\n<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <application android:allowBackup="false" android:label="${escapedName}" android:supportsRtl="true" android:theme="@android:style/Theme.Material.Light.NoActionBar">\n        <activity android:name=".MainActivity" android:exported="true">\n            <intent-filter>\n                <action android:name="android.intent.action.MAIN" />\n                <category android:name="android.intent.category.LAUNCHER" />\n            </intent-filter>\n        </activity>\n    </application>\n</manifest>\n`,
     'app/src/main/java/com/fraty/generatedapp/MainActivity.kt': mainActivity,
     'README.md': readme,
@@ -52,7 +53,7 @@ function projectFiles({ appName, summary, mainActivity, wrapperJar, wrapperPrope
   ]));
 }
 
-export async function generateAndroidProject({ prompt, apiKey, baseUrl, model }) {
+export async function generateAndroidProject({ prompt, apiKey, baseUrl, model, buildId = randomUUID() }) {
   const systemPrompt = [
     'You are FRATY AI, an expert Android engineer. Turn the user request into a small, useful, self-contained Android starter app implemented with Kotlin and Jetpack Compose.',
     'Return ONLY a JSON object with exactly these string fields: appName, summary, mainActivity.',
@@ -107,9 +108,10 @@ export async function generateAndroidProject({ prompt, apiKey, baseUrl, model })
     readFile(WRAPPER_SCRIPT, 'utf8'),
     readFile(WRAPPER_BAT, 'utf8')
   ]);
-  const archive = zipSync(projectFiles({ appName, summary, mainActivity, wrapperJar, wrapperProperties, gradlew, gradlewBat }), { level: 6 });
+  const applicationId = `com.fraty.generated.p${buildId.replaceAll('-', '').slice(0, 12)}`;
+  const archive = zipSync(projectFiles({ appName, applicationId, summary, mainActivity, wrapperJar, wrapperProperties, gradlew, gradlewBat }), { level: 6 });
   if (archive.length > 12_000_000) {
     throw Object.assign(new Error('حجم المشروع الناتج تجاوز الحد المسموح.'), { status: 502 });
   }
-  return { appName, summary, bytes: archive };
+  return { appName, applicationId, summary, bytes: archive };
 }

@@ -25,3 +25,13 @@ services:
         value: ./media
       - key: MEDIA_TTL_SECONDS
         value: "86400"
+      - key: BUILD_GITHUB_REPOSITORY
+        value: mhmdfratyff-prog/fraty_ai
+      - key: BUILD_GITHUB_WORKFLOW
+        value: build-generated-android.yml
+      - key: BUILD_GITHUB_REF
+        value: main
+      - key: BUILD_GITHUB_TOKEN
+        sync: false
+      - key: BUILD_WORKER_SECRET
+        sync: false

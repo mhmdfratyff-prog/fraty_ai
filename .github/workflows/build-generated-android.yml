@@ -1,0 +1,66 @@
+name: Build FRATY Android APK
+run-name: FRATY APK build ${{ inputs.build_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_id:
+        description: Opaque build job identifier
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions: {}
+    steps:
+      - name: Validate job identifier
+        shell: bash
+        env:
+          BUILD_ID: ${{ inputs.build_id }}
+        run: |
+          set -euo pipefail
+          [[ "$BUILD_ID" =~ ^[a-f0-9-]{36}$ ]]
+
+      - name: Download private build source
+        shell: bash
+        env:
+          BUILD_ID: ${{ inputs.build_id }}
+          BUILD_WORKER_SECRET: ${{ secrets.BUILD_WORKER_SECRET }}
+          FRATY_BACKEND_URL: https://fraty-ai-backend.onrender.com
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/fraty-project"
+          curl --fail --silent --show-error --retry 3 \
+            -H "X-Build-Worker-Token: ${BUILD_WORKER_SECRET}" \
+            "$FRATY_BACKEND_URL/api/v1/build-jobs/${BUILD_ID}/source" \
+            -o "$RUNNER_TEMP/fraty-project.zip"
+          unzip -q "$RUNNER_TEMP/fraty-project.zip" -d "$RUNNER_TEMP/fraty-project"
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/fraty-project"
+          java -version
+          bash gradlew assembleDebug --no-daemon
+
+      - name: Return APK to FRATY backend
+        shell: bash
+        env:
+          BUILD_ID: ${{ inputs.build_id }}
+          BUILD_WORKER_SECRET: ${{ secrets.BUILD_WORKER_SECRET }}
+          FRATY_BACKEND_URL: https://fraty-ai-backend.onrender.com
+        run: |
+          set -euo pipefail
+          APK="$RUNNER_TEMP/fraty-project/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          curl --fail --silent --show-error --retry 3 \
+            -X POST \
+            -H "X-Build-Worker-Token: ${BUILD_WORKER_SECRET}" \
+            -H "Content-Type: application/vnd.android.package-archive" \
+            --data-binary "@$APK" \
+            "$FRATY_BACKEND_URL/api/v1/build-jobs/${BUILD_ID}/result"

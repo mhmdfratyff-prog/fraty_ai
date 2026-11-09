@@ -72,10 +72,11 @@ private enum class TaskMode(val title: String, val icon: androidx.compose.ui.gra
 
 private fun inferTaskMode(prompt: String): TaskMode {
     val text = prompt.lowercase()
+    val looksLikeAndroidCode = listOf("@composable", "androidmanifest.xml", "build.gradle", "androidx.compose", "class mainactivity", "componentactivity").any(text::contains)
     return when {
         listOf("فيديو", "مقطع", "video", "animate").any(text::contains) -> TaskMode.VIDEO
         listOf("صورة", "ارسم", "أنشئ صورة", "image", "thumbnail", "logo").any(text::contains) -> TaskMode.IMAGE
-        listOf("تطبيق", "apk", "android app", "build an app", "build apk", "ابني التطبيق", "أنشئ تطبيق", "حوّل هذا الكود لتطبيق", "حول الكود لتطبيق").any(text::contains) -> TaskMode.APP
+        looksLikeAndroidCode || listOf("تطبيق", "apk", "android app", "build an app", "build apk", "ابني التطبيق", "أنشئ تطبيق", "حوّل هذا الكود لتطبيق", "حول الكود لتطبيق").any(text::contains) -> TaskMode.APP
         listOf("كود", "برمج", "خطأ kotlin", "code", "debug", "function", "script").any(text::contains) -> TaskMode.CODE
         else -> TaskMode.CHAT
     }
@@ -132,7 +133,7 @@ private fun FratyApp(store: LocalStore) {
         try {
             val api = FratyApi(backendUrl, appToken)
             val response = when (taskMode) {
-                TaskMode.APP -> api.generateMedia("projects", content)
+                TaskMode.APP -> api.buildApp(content)
                 TaskMode.IMAGE -> api.generateMedia("images", content)
                 TaskMode.VIDEO -> api.generateMedia("videos", content)
                 else -> {
@@ -185,7 +186,7 @@ private fun FratyApp(store: LocalStore) {
                     containerColor = Ink,
                     topBar = {
                         TopAppBar(
-                            title = { Column { Text("FRATY AI 1.03", fontWeight = FontWeight.Bold, fontSize = 17.sp); Text(destination.title, color = Muted, fontSize = 11.sp) } },
+                            title = { Column { Text("FRATY AI 1.04", fontWeight = FontWeight.Bold, fontSize = 17.sp); Text(destination.title, color = Muted, fontSize = 11.sp) } },
                             navigationIcon = { IconButton(onClick = { scope.launch { drawerState.open() } }) { Icon(Icons.Default.Menu, "القائمة", tint = White) } },
                             actions = { Box(Modifier.padding(end = 14.dp).size(9.dp).clip(CircleShape).background(if (backendUrl.isBlank()) Muted else Cyan)) },
                             colors = TopAppBarDefaults.topAppBarColors(containerColor = Ink)
@@ -257,7 +258,7 @@ private fun ChatPage(
                     Spacer(Modifier.height(16.dp))
                     Text("ما الذي تود إنشاءه اليوم؟", color = Cyan, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(12.dp))
-                    Text("اكتب طلبك كما هو: محادثة أو صورة أو فيديو أو كود أو تطبيق.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
+                    Text("اكتب طلبك كما هو. عند طلب تطبيق أو لصق كود Android، سيبدأ إنشاءه وبناء APK.", color = Muted, fontSize = 13.sp, lineHeight = 19.sp)
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -265,7 +266,7 @@ private fun ChatPage(
         } else {
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), reverseLayout = false, contentPadding = PaddingValues(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 itemsIndexed(messages) { _, message -> MessageBubble(message) }
-                if (busy) item { Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), color = Cyan, strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("جارٍ انتظار استجابة الخادم…", color = Muted, fontSize = 12.sp) } }
+                if (busy) item { Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(18.dp), color = Cyan, strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("جارٍ تنفيذ الطلب؛ قد يستغرق بناء APK عدة دقائق…", color = Muted, fontSize = 12.sp) } }
             }
         }
         AnimatedVisibility(error.isNotBlank()) { StatusCard(error, true) }
@@ -333,8 +334,8 @@ private fun SettingsPage(modifier: Modifier, url: String, token: String, onUrl: 
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("حالة التكامل", color = Cyan, fontWeight = FontWeight.Bold)
                 Text("المحادثة والبرمجة: POST /api/v1/chat (يتطلب مفتاح نموذج على الخادم).", color = Muted, fontSize = 12.sp)
-                Text("إنشاء التطبيقات: ينتج مشروع Android Studio مضغوطًا ZIP من وصفك أو كودك؛ بناء APK تلقائيًا غير متاح في الخطة المجانية الحالية.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
-                Text("الصور والفيديو: غير مفعّلين على الخطة المجانية الحالية؛ بناء APK تلقائي يحتاج عامل بناء وربط GitHub منفصلًا.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("إنشاء التطبيقات: يرسل الوصف أو كود Android إلى عامل بناء GitHub Actions ويعيد APK تجريبيًا داخل المحادثة.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
+                Text("الصور والفيديو الحقيقيان غير مفعّلين. APK تجريبي لا يستخدم مفتاح توقيع متجر Play.", color = Muted, fontSize = 12.sp, lineHeight = 18.sp)
                 Text("الرمز هنا ليس مفتاح نموذج. يوصى بخادم HTTPS مع مصادقة ومعدلات استخدام محدودة.", color = Muted, fontSize = 11.sp)
             }
         }
